@@ -11,6 +11,10 @@ Themes live in separate folders inside `themes/`. Each public theme must be list
 
 Only these theme folders are intended for the public repository.
 
+`index.github.json` is the clean public registry for GitHub uploads. The local
+`index.json` can include private/local theme folders so they remain available in
+the app without being published.
+
 ## Folder Format
 
 ```text
