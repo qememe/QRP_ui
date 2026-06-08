@@ -69,4 +69,4 @@ Chats, API settings, characters, and imported instruction presets are stored in 
 
 ## License
 
-No license file is currently included. Add one before accepting external contributions.
+MIT. See [LICENSE](LICENSE).
