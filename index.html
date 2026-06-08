@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RPUI</title>
+    <link rel="stylesheet" href="./styles.css?v=4" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div>
+            <h1>RPUI</h1>
+            <p>Ролевые чаты с OpenAI-compatible API</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>API</h2>
+            <span id="apiStatus" class="status">не настроено</span>
+          </div>
+          <label>
+            URL
+            <input id="apiUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="off" />
+          </label>
+          <label>
+            Ключ
+            <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+          </label>
+          <button id="toggleApiKey" class="ghost" type="button">Показать ключ</button>
+          <div class="row">
+            <select id="modelSelect" aria-label="Модель"></select>
+            <button id="loadModels" type="button">Модели</button>
+          </div>
+          <label class="checkbox-row">
+            <input id="webSearchEnabled" type="checkbox" />
+            Интернет-поиск
+          </label>
+          <label>
+            Режим поиска
+            <select id="webSearchMode">
+              <option value="openai">OpenAI web_search_preview</option>
+              <option value="openrouter">OpenRouter web plugin</option>
+              <option value="searxng">SearXNG бесплатно</option>
+            </select>
+          </label>
+          <label class="searxng-setting">
+            SearXNG URL
+            <input id="searxngUrl" type="url" placeholder="http://localhost:8088" autocomplete="off" />
+          </label>
+          <label class="searxng-setting">
+            Результатов
+            <input id="searxngMaxResults" type="number" min="1" max="10" step="1" />
+          </label>
+          <label>
+            Когда искать
+            <select id="webSearchPolicy">
+              <option value="auto">По необходимости</option>
+              <option value="always">При каждом сообщении</option>
+            </select>
+          </label>
+          <label>
+            Разрешить HTML в сообщениях
+            <select id="messageHtmlMode">
+              <option value="off">Выключено</option>
+              <option value="safe">Безопасный HTML</option>
+              <option value="full">Полный HTML</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Тема</h2>
+            <span id="themeStatus" class="status">загрузка</span>
+          </div>
+          <div class="row">
+            <select id="themeSelect" aria-label="Тема"></select>
+            <button id="reloadThemes" type="button">Обновить</button>
+          </div>
+        </section>
+
+        <section class="panel grow">
+          <div class="panel-title">
+            <h2>Персонажи</h2>
+            <button id="newCharacter" class="small-button" type="button">+</button>
+          </div>
+          <div id="charactersList" class="list"></div>
+        </section>
+
+        <section class="panel grow">
+          <div class="panel-title">
+            <h2>Чаты</h2>
+            <button id="newChat" class="small-button" type="button">+</button>
+          </div>
+          <div id="chatsList" class="list"></div>
+        </section>
+      </aside>
+      <button id="sidebarToggle" class="sidebar-toggle" type="button" title="Скрыть левую панель">☰</button>
+
+      <main class="workspace">
+        <header class="chat-header">
+          <div>
+            <h2 id="chatTitle">Новый чат</h2>
+            <p id="chatSubtitle">Выберите персонажа и начните RP</p>
+          </div>
+          <div class="chat-header-actions">
+            <button id="renameChat" class="ghost" type="button">Переименовать</button>
+            <button id="deleteChat" class="ghost danger" type="button">Удалить чат</button>
+          </div>
+        </header>
+
+        <section id="setupView" class="setup">
+          <div class="setup-inner">
+            <h2>Новый RP чат</h2>
+            <label>
+              Персонаж
+              <select id="chatCharacter"></select>
+            </label>
+            <button id="startChat" type="button">Начать</button>
+          </div>
+        </section>
+
+        <section id="messages" class="messages" aria-live="polite"></section>
+
+        <form id="composer" class="composer">
+          <textarea id="messageInput" rows="3" placeholder="Напишите сообщение... Поддерживается Markdown"></textarea>
+          <button id="sendMessage" type="submit">Отправить</button>
+        </form>
+      </main>
+
+      <aside class="right-panel">
+        <section class="panel instructions-panel">
+          <div class="panel-title">
+            <h2>Инструкции</h2>
+            <span id="instructionPresetStatus" class="status">нет</span>
+          </div>
+          <label class="checkbox-row">
+            <input id="instructionPresetsEnabled" type="checkbox" />
+            Доп. инструкции
+          </label>
+          <label>
+            Набор
+            <select id="instructionPresetSelect" aria-label="Набор дополнительных инструкций"></select>
+          </label>
+          <div class="row">
+            <button id="importInstructionPreset" type="button">Импорт JSON</button>
+            <button id="deleteInstructionPreset" class="ghost danger" type="button">Удалить</button>
+          </div>
+          <div id="instructionEntries" class="instruction-entries" aria-label="Элементы инструкций"></div>
+          <input id="instructionPresetFile" type="file" accept=".json,application/json" hidden />
+        </section>
+      </aside>
+      <button id="rightPanelToggle" class="right-panel-toggle" type="button" title="Скрыть правую панель">×</button>
+    </div>
+
+    <dialog id="characterDialog">
+      <form id="characterForm" method="dialog" class="dialog-card">
+        <h2 id="characterDialogTitle">Персонаж</h2>
+        <input id="characterId" type="hidden" />
+        <label>
+          Название
+          <input id="characterName" required maxlength="80" placeholder="Например: Детектив Алиса" />
+        </label>
+        <label>
+          Системные настройки
+          <textarea id="characterSystem" required rows="9" placeholder="Стиль, роль, ограничения, лор, манера речи..."></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button id="deleteCharacter" class="ghost danger" type="button">Удалить</button>
+          <span class="spacer"></span>
+          <button class="ghost" value="cancel" type="button" id="cancelCharacter">Отмена</button>
+          <button value="default" type="submit">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+    <script src="./app.js?v=4"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+# Local/private SillyTavern presets
+RE (´｡• ᵕ •｡`) Celia V5.4.json
+RE (´｡• ᵕ •｡`) Celia V5.4 RU.json
+
+# Theme packs kept local
+themes/asuka/
+themes/brat/
+themes/evangelion/
+themes/gruz200/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Runtime/cache files
+*.log
+node_modules/
+dist/
+build/

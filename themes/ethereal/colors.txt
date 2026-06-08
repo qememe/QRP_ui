@@ -1,0 +1,31 @@
+# RPUI theme file. Format: key=value
+# Optional files in this folder:
+# fontFile=font.woff2
+# chatBackgroundImage=chat.jpg
+# sidebarBackgroundImage=sidebar.jpg
+
+name=Эфирная
+colorScheme=dark
+
+# Deep mystical indigo night palette
+bg=#0a0912
+surface=#13111d
+surface2=#1f1c2e
+text=#ede9ff
+muted=#9f98c4
+line=#353147
+accent=#8b7bf0
+accentStrong=#a99df5
+danger=#f26e8a
+shadow=0 18px 50px rgba(0, 0, 0, 0.55)
+
+# Elegant fantasy serif for immersive roleplay
+fontFamily=Cinzel, 'Playfair Display', Georgia, serif
+
+chatBackground=#0a0912
+sidebarBackground=#13111d
+panelBackground=#13111d
+
+# Atmospheric ethereal backgrounds
+chatBackgroundImage=chat.jpg
+sidebarBackgroundImage=sidebar.jpg

@@ -1,0 +1,16 @@
+{
+  "themes": [
+    {
+      "id": "light"
+    },
+    {
+      "id": "dark"
+    },
+    {
+      "id": "ethereal"
+    },
+    {
+      "id": "crimson"
+    }
+  ]
+}

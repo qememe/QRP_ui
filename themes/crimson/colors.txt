@@ -1,0 +1,31 @@
+# RPUI theme file. Format: key=value
+# Optional files in this folder:
+# fontFile=font.woff2
+# chatBackgroundImage=chat.jpg
+# sidebarBackgroundImage=sidebar.jpg
+
+name=Багряная
+colorScheme=dark
+
+# Opulent crimson velvet and gold dark palette
+bg=#11090b
+surface=#1c1115
+surface2=#28191f
+text=#f9f0f3
+muted=#b89da6
+line=#463036
+accent=#b23a52
+accentStrong=#d14d66
+danger=#ff6670
+shadow=0 20px 55px rgba(0, 0, 0, 0.6)
+
+# Classic refined serif for dramatic storytelling
+fontFamily='Playfair Display', Georgia, 'Times New Roman', serif
+
+chatBackground=#11090b
+sidebarBackground=#1c1115
+panelBackground=#1c1115
+
+# Luxurious dramatic crimson backgrounds
+chatBackgroundImage=chat.jpg
+sidebarBackgroundImage=sidebar.jpg
