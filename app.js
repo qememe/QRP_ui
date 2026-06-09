@@ -102,10 +102,13 @@ const markdownBlockContainers = new Set([
   "th",
 ]);
 const markdownSkipContainers = new Set(["code", "pre", "script", "style", "textarea"]);
+const STREAM_RENDER_INTERVAL_MS = 120;
+const SLOW_STREAM_RENDER_MS = 48;
 
 let availableThemes = [...fallbackThemes];
 const activeThinkingMessageIds = new Set();
 const transientThoughts = new Map();
+const streamingRenderCache = new Map();
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -399,7 +402,7 @@ function deleteChatById(id) {
   render();
 }
 
-function render() {
+function render(options = {}) {
   document.documentElement.dataset.theme = state.theme;
   applyActiveTheme();
   el.app.classList.toggle("sidebar-collapsed", Boolean(state.sidebarCollapsed));
@@ -429,7 +432,7 @@ function render() {
   renderCharacters();
   renderChats();
   renderChatCharacterSelect();
-  renderConversation();
+  renderConversation(options);
   saveState();
 }
 
@@ -592,7 +595,9 @@ function renderChatCharacterSelect() {
   });
 }
 
-function renderConversation() {
+function renderConversation(options = {}) {
+  const { preserveMessagesScroll = false, scrollMessagesToEnd = true } = options;
+  const scrollSnapshot = preserveMessagesScroll ? getMessagesScrollSnapshot() : null;
   const chat = activeChat();
   const hasChat = Boolean(chat);
   el.setupView.classList.toggle("hidden", hasChat);
@@ -616,9 +621,13 @@ function renderConversation() {
 
   chat.messages.forEach((message) => {
     const isAssistant = message.role === "assistant";
+    const variants = isAssistant ? getAssistantVariants(message) : [];
+    const variantIndex = getAssistantVariantIndex(message, variants);
+    const hasVariants = variants.length > 1;
     const thoughts = isAssistant ? transientThoughts.get(message.id) || "" : "";
     const isThinking = isAssistant && activeThinkingMessageIds.has(message.id);
-    const visibleContent = isThinking && message.content === "..." ? "" : message.content;
+    const messageContent = isAssistant ? getMessageContent(message) : message.content;
+    const visibleContent = isThinking && messageContent === "..." ? "" : messageContent;
     const node = document.createElement("article");
     node.className = `message ${message.role}`;
     node.dataset.messageId = message.id;
@@ -627,6 +636,18 @@ function renderConversation() {
         <strong>${message.role === "user" ? "Вы" : escapeHtml(character?.name || "ИИ")}</strong>
         <div class="message-actions">
           <button class="ghost" type="button" data-action="edit">Изменить</button>
+          ${
+            isAssistant
+              ? '<button class="ghost" type="button" data-action="regenerate">Перегенерировать</button>'
+              : ""
+          }
+          ${
+            isAssistant && hasVariants && !isThinking
+              ? `<button class="ghost variant-arrow" type="button" data-action="variant-prev" title="Предыдущий вариант">‹</button>
+                 <span class="variant-counter">${variantIndex + 1}/${variants.length}</span>
+                 <button class="ghost variant-arrow" type="button" data-action="variant-next" title="Следующий вариант">›</button>`
+              : ""
+          }
           <button class="ghost danger" type="button" data-action="delete">Удалить</button>
         </div>
       </div>
@@ -635,7 +656,11 @@ function renderConversation() {
     `;
     el.messages.append(node);
   });
-  el.messages.scrollTop = el.messages.scrollHeight;
+  if (scrollSnapshot) {
+    restoreMessagesScroll(scrollSnapshot);
+  } else if (scrollMessagesToEnd) {
+    scrollMessagesToBottom();
+  }
 }
 
 function renderThinkingBlock(thoughts) {
@@ -648,6 +673,63 @@ function renderThinkingBlock(thoughts) {
       <div class="thinking-content">${content}</div>
     </div>
   `;
+}
+
+function getMessageNode(messageId) {
+  return [...el.messages.children].find((node) => node.dataset.messageId === messageId) || null;
+}
+
+function renderStreamingMessage(message) {
+  const startedAt = performance.now();
+  const node = getMessageNode(message.id);
+  if (!node) {
+    renderConversation({ preserveMessagesScroll: true, scrollMessagesToEnd: false });
+    return performance.now() - startedAt;
+  }
+
+  const isThinking = activeThinkingMessageIds.has(message.id);
+  const thoughts = transientThoughts.get(message.id) || "";
+  const messageContent = getMessageContent(message);
+  const visibleContent = isThinking && messageContent === "..." ? "" : messageContent;
+  const cached = streamingRenderCache.get(message.id) || {};
+  const existingThinking = node.querySelector(".thinking-block");
+
+  if (isThinking) {
+    if (cached.thoughts !== thoughts || !existingThinking) {
+      const thinkingHtml = renderThinkingBlock(thoughts);
+      if (existingThinking) {
+        existingThinking.outerHTML = thinkingHtml;
+      } else {
+        node.querySelector(".message-head")?.insertAdjacentHTML("afterend", thinkingHtml);
+      }
+    }
+  } else if (existingThinking) {
+    existingThinking.remove();
+  }
+
+  if (cached.content !== visibleContent) {
+    const contentNode = node.querySelector(".content");
+    if (contentNode) contentNode.innerHTML = renderMarkdown(visibleContent);
+  }
+
+  streamingRenderCache.set(message.id, { content: visibleContent, thoughts });
+  return performance.now() - startedAt;
+}
+
+function getMessagesScrollSnapshot() {
+  return {
+    scrollTop: el.messages.scrollTop,
+    scrollHeight: el.messages.scrollHeight,
+  };
+}
+
+function restoreMessagesScroll(snapshot) {
+  const scrollDelta = el.messages.scrollHeight - snapshot.scrollHeight;
+  el.messages.scrollTop = Math.max(0, snapshot.scrollTop + Math.min(scrollDelta, 0));
+}
+
+function scrollMessagesToBottom() {
+  el.messages.scrollTop = el.messages.scrollHeight;
 }
 
 function openCharacterDialog(id = "") {
@@ -913,8 +995,8 @@ function buildInstructionMessages(character, chat, latestUserContent) {
 }
 
 function getPromptContext(character, chat, latestUserContent) {
-  const history = chat?.messages?.filter((message) => message.content !== "...") || [];
-  const lastMessage = history[history.length - 1]?.content || latestUserContent || "";
+  const history = chat?.messages?.filter((message) => getMessageContent(message) !== "...") || [];
+  const lastMessage = getMessageContent(history[history.length - 1]) || latestUserContent || "";
   return {
     char: character?.name || "ИИ",
     user: "Human",
@@ -926,6 +1008,68 @@ function getPromptContext(character, chat, latestUserContent) {
     group: "",
     lastChatMessage: lastMessage,
   };
+}
+
+function getMessageContent(message) {
+  if (!message) return "";
+  if (message.role === "assistant") {
+    if (activeThinkingMessageIds.has(message.id)) return String(message.content || "");
+    const variants = getAssistantVariants(message);
+    if (variants.length) return variants[getAssistantVariantIndex(message, variants)] || "";
+  }
+  return String(message.content || "");
+}
+
+function getAssistantVariants(message) {
+  if (message?.role !== "assistant") return [];
+  const variants = Array.isArray(message.variants)
+    ? message.variants.filter((variant) => typeof variant === "string")
+    : [];
+  if (variants.length) return variants;
+  return message.content ? [String(message.content)] : [];
+}
+
+function getAssistantVariantIndex(message, variants = getAssistantVariants(message)) {
+  const maxIndex = Math.max(variants.length - 1, 0);
+  return clampNumber(message?.variantIndex ?? 0, 0, maxIndex);
+}
+
+function setAssistantVariant(message, index) {
+  if (message?.role !== "assistant") return;
+  const variants = getAssistantVariants(message);
+  if (!variants.length) return;
+  const variantIndex = getAssistantVariantIndex({ variantIndex: index }, variants);
+  message.variants = variants;
+  message.variantIndex = variantIndex;
+  message.content = variants[variantIndex];
+}
+
+function pushAssistantVariant(message, content) {
+  if (message?.role !== "assistant") return;
+  const variants = Array.isArray(message.variants)
+    ? message.variants.filter((variant) => typeof variant === "string" && variant !== "...")
+    : [];
+  if (!variants.length && message.content && message.content !== "..." && message.content !== content) {
+    variants.push(String(message.content));
+  }
+  variants.push(content);
+  message.variants = variants;
+  message.variantIndex = variants.length - 1;
+  message.content = content;
+}
+
+function messageToApiMessage(message) {
+  return {
+    role: message.role,
+    content: getMessageContent(message),
+  };
+}
+
+function getLatestUserContent(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "user") return getMessageContent(messages[index]);
+  }
+  return "";
 }
 
 function expandSillyTavernTemplate(content, context, variables) {
@@ -975,80 +1119,116 @@ async function sendMessage(event) {
   }
 
   chat.messages.push({ id: createId(), role: "user", content });
-  el.messageInput.value = "";
-  render();
-
   const assistantMessage = { id: createId(), role: "assistant", content: "..." };
   chat.messages.push(assistantMessage);
   activeThinkingMessageIds.add(assistantMessage.id);
   transientThoughts.set(assistantMessage.id, "");
+  streamingRenderCache.delete(assistantMessage.id);
+  el.messageInput.value = "";
   render();
 
   try {
-    const character = characterById(chat.characterId);
-    const instructionMessages = buildInstructionMessages(character, chat, content);
-    const historyMessages = chat.messages
-      .filter((message) => message.content !== "...")
-      .map(({ role, content }) => ({ role, content }));
-    const messages = [...instructionMessages, ...historyMessages];
-    if (state.webSearchEnabled && state.webSearchMode === "searxng") {
-      const searchDecision = await getSearxngSearchDecision(messages, content);
-      let searchContext = "";
-      if (searchDecision.search) {
-        assistantMessage.content = "Ищу информацию через SearXNG...";
-        render();
-        searchContext = await getSearxngSearchContext(searchDecision.query || content);
-      }
-      if (searchContext) {
-        messages.splice(instructionMessages.length, 0, {
-          role: "system",
-          content: searchContext,
-        });
-      }
-    }
-    const payload = {
-      model: state.selectedModel,
-      messages,
-      temperature: 0.8,
-      stream: true,
-    };
-    applyWebSearchPayload(payload);
-    const response = await fetch(getEndpoint("/chat/completions"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${state.apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) throw new Error(await getApiErrorMessage(response));
-    assistantMessage.content = "";
-    const scheduleRender = throttleRender();
-    await readChatCompletionStream(
-      response,
-      (delta) => {
-        assistantMessage.content += delta;
-        scheduleRender();
-      },
-      (thoughtDelta) => {
-        transientThoughts.set(
-          assistantMessage.id,
-          `${transientThoughts.get(assistantMessage.id) || ""}${thoughtDelta}`,
-        );
-        scheduleRender();
-      },
-    );
-    scheduleRender.flush();
-    if (!assistantMessage.content.trim()) {
-      assistantMessage.content = "Пустой ответ от модели.";
-    }
+    const generatedContent = await generateAssistantResponse(chat, assistantMessage, chat.messages, content);
+    pushAssistantVariant(assistantMessage, generatedContent);
   } catch (error) {
     assistantMessage.content = `Ошибка запроса: ${error.message}`;
+    setStatus(`ошибка: ${error.message}`);
   } finally {
     activeThinkingMessageIds.delete(assistantMessage.id);
     transientThoughts.delete(assistantMessage.id);
-    render();
+    streamingRenderCache.delete(assistantMessage.id);
+    render({ preserveMessagesScroll: true, scrollMessagesToEnd: false });
   }
+}
+
+async function generateAssistantResponse(chat, assistantMessage, history, latestUserContent) {
+  const character = characterById(chat.characterId);
+  const instructionMessages = buildInstructionMessages(character, chat, latestUserContent);
+  const historyMessages = history
+    .filter((message) => getMessageContent(message) !== "...")
+    .map(messageToApiMessage);
+  const messages = [...instructionMessages, ...historyMessages];
+
+  if (state.webSearchEnabled && state.webSearchMode === "searxng") {
+    const searchDecision = await getSearxngSearchDecision(messages, latestUserContent);
+    let searchContext = "";
+    if (searchDecision.search) {
+      assistantMessage.content = "Ищу информацию через SearXNG...";
+      render({ preserveMessagesScroll: true, scrollMessagesToEnd: false });
+      searchContext = await getSearxngSearchContext(searchDecision.query || latestUserContent);
+    }
+    if (searchContext) {
+      messages.splice(instructionMessages.length, 0, {
+        role: "system",
+        content: searchContext,
+      });
+    }
+  }
+
+  const payload = {
+    model: state.selectedModel,
+    messages,
+    temperature: 0.8,
+    stream: true,
+  };
+  applyWebSearchPayload(payload);
+  const requestSummary = createRequestSummary(payload);
+  const metrics = createStreamMetrics({
+    model: state.selectedModel,
+    messageCount: requestSummary.messageCount,
+    promptChars: requestSummary.promptChars,
+    bodyBytes: requestSummary.bodyBytes,
+  });
+  logRequestSummary(requestSummary, payload);
+  setStatus("запрос...");
+  const response = await fetch(getEndpoint("/chat/completions"), {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${state.apiKey}`,
+    },
+    body: requestSummary.body,
+  });
+  if (!response.ok) throw new Error(await getApiErrorMessage(response));
+  metrics.responseAt = performance.now();
+  metrics.generationId = response.headers.get("X-Generation-Id") || "";
+  setStatus(`стрим открыт ${formatDuration(metrics.responseAt - metrics.startedAt)}`);
+
+  assistantMessage.content = "";
+  const scheduleRender = throttleRender(() => {
+    recordStreamRender(metrics, renderStreamingMessage(assistantMessage));
+  }, STREAM_RENDER_INTERVAL_MS);
+  await readChatCompletionStream(
+    response,
+    (delta) => {
+      if (!metrics.firstContentAt) {
+        metrics.firstContentAt = performance.now();
+        setStatus(`первый текст ${formatDuration(metrics.firstContentAt - metrics.startedAt)}`);
+      }
+      metrics.contentChars += delta.length;
+      assistantMessage.content += delta;
+      scheduleRender();
+    },
+    (thoughtDelta) => {
+      if (!metrics.firstReasoningAt) {
+        metrics.firstReasoningAt = performance.now();
+        setStatus(`первые мысли ${formatDuration(metrics.firstReasoningAt - metrics.startedAt)}`);
+      }
+      metrics.reasoningChars += thoughtDelta.length;
+      transientThoughts.set(
+        assistantMessage.id,
+        `${transientThoughts.get(assistantMessage.id) || ""}${thoughtDelta}`,
+      );
+      scheduleRender();
+    },
+    (event) => recordStreamEvent(metrics, event),
+  );
+  scheduleRender.flush();
+  metrics.completedAt = performance.now();
+  logStreamMetrics(metrics);
+  setStatus(formatStreamMetricsStatus(metrics));
+  return assistantMessage.content.trim() || "Пустой ответ от модели.";
 }
 
 function applyWebSearchPayload(payload) {
@@ -1169,6 +1349,154 @@ function clampNumber(value, min, max) {
   return Math.min(Math.max(number, min), max);
 }
 
+function countMessageChars(messages) {
+  return messages.reduce((total, message) => total + String(message.content || "").length, 0);
+}
+
+function createRequestSummary(payload) {
+  const body = JSON.stringify(payload);
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const messageStats = messages.map((message, index) => ({
+    index,
+    role: message.role,
+    chars: String(message.content || "").length,
+  }));
+  return {
+    body,
+    bodyBytes: new TextEncoder().encode(body).byteLength,
+    model: payload.model,
+    messageCount: messages.length,
+    promptChars: countMessageChars(messages),
+    messageStats,
+    temperature: payload.temperature,
+    stream: Boolean(payload.stream),
+    hasTools: Array.isArray(payload.tools) && payload.tools.length > 0,
+    hasPlugins: Array.isArray(payload.plugins) && payload.plugins.length > 0,
+    tools: payload.tools?.map((tool) => tool.type || tool.function?.name || "tool") || [],
+    plugins: payload.plugins?.map((plugin) => plugin.id || "plugin") || [],
+    webSearchEnabled: Boolean(state.webSearchEnabled),
+    webSearchMode: state.webSearchMode,
+    webSearchPolicy: state.webSearchPolicy,
+    instructionPresetsEnabled: Boolean(state.instructionPresetsEnabled && activeInstructionPreset()),
+  };
+}
+
+function logRequestSummary(summary, payload) {
+  globalThis.__RPUI_LAST_REQUEST__ = {
+    summary,
+    payload: structuredClone(payload),
+  };
+  console.info("[RPUI request]", {
+    model: summary.model,
+    bodyBytes: summary.bodyBytes,
+    messageCount: summary.messageCount,
+    promptChars: summary.promptChars,
+    messageStats: summary.messageStats,
+    temperature: summary.temperature,
+    stream: summary.stream,
+    hasTools: summary.hasTools,
+    hasPlugins: summary.hasPlugins,
+    tools: summary.tools,
+    plugins: summary.plugins,
+    webSearchEnabled: summary.webSearchEnabled,
+    webSearchMode: summary.webSearchMode,
+    webSearchPolicy: summary.webSearchPolicy,
+    instructionPresetsEnabled: summary.instructionPresetsEnabled,
+  });
+}
+
+function createStreamMetrics({ model, messageCount, promptChars, bodyBytes }) {
+  return {
+    model,
+    messageCount,
+    promptChars,
+    bodyBytes,
+    startedAt: performance.now(),
+    responseAt: 0,
+    firstByteAt: 0,
+    firstSseAt: 0,
+    firstReasoningAt: 0,
+    firstContentAt: 0,
+    completedAt: 0,
+    networkChunks: 0,
+    sseChunks: 0,
+    openRouterProcessingComments: 0,
+    contentChars: 0,
+    reasoningChars: 0,
+    renderCount: 0,
+    maxRenderMs: 0,
+    generationId: "",
+  };
+}
+
+function recordStreamEvent(metrics, event) {
+  if (!event) return;
+  const receivedAt = event.receivedAt || performance.now();
+  if (event.type === "network-chunk") {
+    metrics.networkChunks += 1;
+    if (!metrics.firstByteAt) metrics.firstByteAt = receivedAt;
+    return;
+  }
+  if (event.type === "sse") {
+    metrics.sseChunks += 1;
+    if (!metrics.firstSseAt) metrics.firstSseAt = receivedAt;
+    return;
+  }
+  if (event.type === "comment" && /OPENROUTER PROCESSING/i.test(event.comment || "")) {
+    metrics.openRouterProcessingComments += 1;
+  }
+}
+
+function recordStreamRender(metrics, duration) {
+  metrics.renderCount += 1;
+  metrics.maxRenderMs = Math.max(metrics.maxRenderMs, duration || 0);
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "нет";
+  if (ms < 1000) return `${Math.round(ms)}мс`;
+  return `${(ms / 1000).toFixed(1)}с`;
+}
+
+function metricOffset(metrics, key) {
+  return metrics[key] ? formatDuration(metrics[key] - metrics.startedAt) : "нет";
+}
+
+function formatStreamMetricsStatus(metrics) {
+  const parts = [
+    `текст ${metricOffset(metrics, "firstContentAt")}`,
+    `всего ${formatDuration(metrics.completedAt - metrics.startedAt)}`,
+  ];
+  if (metrics.maxRenderMs > SLOW_STREAM_RENDER_MS) {
+    parts.push(`UI ${formatDuration(metrics.maxRenderMs)}`);
+  }
+  return `готово: ${parts.join(", ")}`;
+}
+
+function logStreamMetrics(metrics) {
+  const data = {
+    model: metrics.model,
+    generationId: metrics.generationId || undefined,
+    messageCount: metrics.messageCount,
+    promptChars: metrics.promptChars,
+    bodyBytes: metrics.bodyBytes,
+    response: metricOffset(metrics, "responseAt"),
+    firstByte: metricOffset(metrics, "firstByteAt"),
+    firstSse: metricOffset(metrics, "firstSseAt"),
+    firstReasoning: metricOffset(metrics, "firstReasoningAt"),
+    firstContent: metricOffset(metrics, "firstContentAt"),
+    total: formatDuration(metrics.completedAt - metrics.startedAt),
+    openRouterProcessingComments: metrics.openRouterProcessingComments,
+    networkChunks: metrics.networkChunks,
+    sseChunks: metrics.sseChunks,
+    contentChars: metrics.contentChars,
+    reasoningChars: metrics.reasoningChars,
+    renderCount: metrics.renderCount,
+    maxRender: formatDuration(metrics.maxRenderMs),
+  };
+  console.info("[RPUI stream]", data);
+}
+
 async function getApiErrorMessage(response) {
   let details = "";
   try {
@@ -1192,19 +1520,19 @@ async function getApiErrorMessage(response) {
   return `${response.status} ${response.statusText}${details}`;
 }
 
-function throttleRender() {
+function throttleRender(callback = render, delay = 80) {
   let timeout = 0;
   let pending = false;
 
   const flush = () => {
     pending = false;
     timeout = 0;
-    render();
+    callback();
   };
 
   const schedule = () => {
     pending = true;
-    if (!timeout) timeout = setTimeout(flush, 80);
+    if (!timeout) timeout = setTimeout(flush, delay);
   };
 
   schedule.flush = () => {
@@ -1215,7 +1543,12 @@ function throttleRender() {
   return schedule;
 }
 
-async function readChatCompletionStream(response, onDelta, onThoughtDelta = () => {}) {
+async function readChatCompletionStream(
+  response,
+  onDelta,
+  onThoughtDelta = () => {},
+  onStreamEvent = () => {},
+) {
   if (!response.body) {
     const data = await response.json();
     const message = data.choices?.[0]?.message || {};
@@ -1231,33 +1564,54 @@ async function readChatCompletionStream(response, onDelta, onThoughtDelta = () =
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
+    onStreamEvent({
+      type: "network-chunk",
+      bytes: value.byteLength || value.length || 0,
+      receivedAt: performance.now(),
+    });
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
 
     for (const line of lines) {
       const trimmed = line.trim();
+      if (trimmed.startsWith(":")) {
+        onStreamEvent({
+          type: "comment",
+          comment: trimmed.slice(1).trim(),
+          receivedAt: performance.now(),
+        });
+        continue;
+      }
       if (!trimmed.startsWith("data:")) continue;
       const data = trimmed.slice(5).trim();
       if (!data || data === "[DONE]") continue;
 
+      let chunk;
       try {
-        const chunk = JSON.parse(data);
-        const choice = chunk.choices?.[0] || {};
-        const deltaObject = choice.delta || choice.message || {};
-        const thoughtDelta = getReasoningDelta(deltaObject);
-        const delta = deltaObject.content || choice.text || "";
-        if (thoughtDelta) onThoughtDelta(thoughtDelta);
-        if (delta) onDelta(delta);
+        chunk = JSON.parse(data);
       } catch {
         // Some compatible APIs can emit non-JSON keepalive data; ignore it.
+        continue;
       }
+      onStreamEvent({ type: "sse", chunk, receivedAt: performance.now() });
+      if (chunk.error) {
+        throw new Error(chunk.error.message || "ошибка стрима от провайдера");
+      }
+      const choice = chunk.choices?.[0] || {};
+      const deltaObject = choice.delta || choice.message || {};
+      const thoughtDelta = getReasoningDelta(deltaObject);
+      const delta = deltaObject.content || choice.text || "";
+      if (thoughtDelta) onThoughtDelta(thoughtDelta);
+      if (delta) onDelta(delta);
     }
   }
 }
 
 function getReasoningDelta(delta) {
   if (!delta || typeof delta !== "object") return "";
+  const pieces = [];
+  appendReasoningText(pieces, delta.reasoning_details || delta.reasoningDetails);
   const reasoning =
     delta.reasoning_content ||
     delta.reasoning ||
@@ -1265,13 +1619,66 @@ function getReasoningDelta(delta) {
     delta.thoughts ||
     delta.reasoning_text ||
     "";
-  if (typeof reasoning === "string") return reasoning;
-  if (Array.isArray(reasoning)) {
-    return reasoning
-      .map((item) => (typeof item === "string" ? item : item?.text || item?.content || ""))
-      .join("");
+  appendReasoningText(pieces, reasoning);
+  return pieces.join("");
+}
+
+function appendReasoningText(pieces, value) {
+  const text = normalizeReasoningText(value);
+  if (text) pieces.push(text);
+}
+
+function normalizeReasoningText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(normalizeReasoningText).join("");
+  if (typeof value !== "object") return "";
+  return value.text || value.summary || value.content || "";
+}
+
+async function regenerateAssistantMessage(node) {
+  syncApiSettingsFromInputs();
+  const chat = activeChat();
+  const messageIndex = chat?.messages.findIndex((item) => item.id === node.dataset.messageId) ?? -1;
+  const assistantMessage = messageIndex >= 0 ? chat.messages[messageIndex] : null;
+  if (!chat || assistantMessage?.role !== "assistant") return;
+  if (activeThinkingMessageIds.has(assistantMessage.id)) return;
+  if (!state.selectedModel) {
+    setStatus("выберите модель");
+    return;
   }
-  return reasoning?.text || reasoning?.content || "";
+
+  const previousContent = getMessageContent(assistantMessage);
+  const history = chat.messages.slice(0, messageIndex);
+  const latestUserContent = getLatestUserContent(history);
+  if (previousContent && !Array.isArray(assistantMessage.variants)) {
+    assistantMessage.variants = [previousContent];
+    assistantMessage.variantIndex = 0;
+  }
+  assistantMessage.content = "...";
+  activeThinkingMessageIds.add(assistantMessage.id);
+  transientThoughts.set(assistantMessage.id, "");
+  streamingRenderCache.delete(assistantMessage.id);
+  render({ preserveMessagesScroll: true, scrollMessagesToEnd: false });
+
+  try {
+    const generatedContent = await generateAssistantResponse(
+      chat,
+      assistantMessage,
+      history,
+      latestUserContent,
+    );
+    pushAssistantVariant(assistantMessage, generatedContent);
+  } catch (error) {
+    assistantMessage.content = previousContent || `Ошибка запроса: ${error.message}`;
+    if (!previousContent) pushAssistantVariant(assistantMessage, assistantMessage.content);
+    setStatus(`ошибка: ${error.message}`);
+  } finally {
+    activeThinkingMessageIds.delete(assistantMessage.id);
+    transientThoughts.delete(assistantMessage.id);
+    streamingRenderCache.delete(assistantMessage.id);
+    render({ preserveMessagesScroll: true, scrollMessagesToEnd: false });
+  }
 }
 
 function editMessage(node) {
@@ -1284,7 +1691,7 @@ function editMessage(node) {
   const wrapper = document.createElement("div");
   wrapper.className = "edit-box";
   const textarea = document.createElement("textarea");
-  textarea.value = message.content;
+  textarea.value = getMessageContent(message);
   const actions = document.createElement("div");
   actions.className = "message-actions";
   const cancel = document.createElement("button");
@@ -1302,6 +1709,15 @@ function editMessage(node) {
   cancel.addEventListener("click", render);
   save.addEventListener("click", () => {
     message.content = textarea.value.trim();
+    if (message.role === "assistant") {
+      const variants = getAssistantVariants(message);
+      const variantIndex = getAssistantVariantIndex(message, variants);
+      if (variants.length) {
+        variants[variantIndex] = message.content;
+        message.variants = variants;
+        message.variantIndex = variantIndex;
+      }
+    }
     render();
   });
 }
@@ -1805,9 +2221,22 @@ el.messages.addEventListener("click", (event) => {
   const id = node.dataset.messageId;
   if (button.dataset.action === "delete") {
     chat.messages = chat.messages.filter((message) => message.id !== id);
+    activeThinkingMessageIds.delete(id);
+    transientThoughts.delete(id);
+    streamingRenderCache.delete(id);
     render();
   }
   if (button.dataset.action === "edit") editMessage(node);
+  if (button.dataset.action === "regenerate") regenerateAssistantMessage(node);
+  if (button.dataset.action === "variant-prev" || button.dataset.action === "variant-next") {
+    const message = chat.messages.find((item) => item.id === id);
+    const variants = getAssistantVariants(message);
+    if (!message || variants.length < 2) return;
+    const offset = button.dataset.action === "variant-prev" ? -1 : 1;
+    const nextIndex = (getAssistantVariantIndex(message, variants) + offset + variants.length) % variants.length;
+    setAssistantVariant(message, nextIndex);
+    render();
+  }
 });
 
 el.composer.addEventListener("submit", sendMessage);

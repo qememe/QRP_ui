@@ -1,0 +1,32 @@
+# RPUI theme file. Format: key=value
+# Optional files in this folder:
+# fontFile=font.woff2
+# chatBackgroundImage=chat.jpg
+# sidebarBackgroundImage=sidebar.jpg
+
+name=Видеокассета 90-х
+colorScheme=dark
+
+# Found VHS tape from the attic, 1990s consumer video aesthetic
+# Palette dictated by user: deep black surfaces, pale green text, signature bright green accent (VCR LED / phosphor)
+bg=#0a0a0a
+surface=#111111
+surface2=#1a1a1a
+text=#d0ffd0
+muted=#6a8a6a
+line=#253525
+accent=#00ff84
+accentStrong=#33ff99
+danger=#ff3366
+shadow=0 14px 42px rgba(0, 0, 0, 0.78)
+
+# Retro digital / OSD / terminal font - evokes 90s on-screen displays and early computer monitors
+fontFamily='VT323', 'Share Tech Mono', 'Courier New', 'Lucida Console', 'IBM Plex Mono', monospace
+
+chatBackground=#0b100b
+sidebarBackground=#0a0a0a
+panelBackground=#111111
+
+# Backgrounds are pure analog video degradation: heavy VHS noise, scanlines, chromatic fringing, tracking skew
+chatBackgroundImage=chat.jpg
+sidebarBackgroundImage=sidebar.jpg
