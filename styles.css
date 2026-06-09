@@ -14,6 +14,7 @@
   --chat-bg: var(--bg);
   --sidebar-bg: var(--surface);
   --panel-bg: var(--surface);
+  --app-height: 100vh;
 }
 
 [data-theme="dark"] {
@@ -37,13 +38,19 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: var(--app-height, 100vh);
+  min-height: var(--app-height, 100vh);
+  background: var(--bg);
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
-  background: var(--bg);
   color: var(--text);
   font-family: var(--font-family);
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -89,7 +96,7 @@ button:disabled {
 .app {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) 360px;
-  height: 100vh;
+  height: var(--app-height, 100vh);
   overflow: hidden;
   position: relative;
 }
@@ -111,6 +118,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
   min-width: 0;
   padding: 18px;
   background: var(--sidebar-bg);
@@ -144,6 +152,24 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.mobile-mode-toggle {
+  display: none;
+  position: fixed;
+  top: 16px;
+  right: 58px;
+  z-index: 1000;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.mobile-mode-toggle[hidden] {
+  display: none;
+}
+
 .sidebar-toggle {
   left: 16px;
 }
@@ -169,7 +195,8 @@ button:disabled {
 }
 
 .sidebar-toggle:hover,
-.right-panel-toggle:hover {
+.right-panel-toggle:hover,
+.mobile-mode-toggle:hover {
   background: var(--surface-2);
 }
 
@@ -239,7 +266,9 @@ button:disabled {
 .panel {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   gap: 12px;
+  min-height: 0;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -247,10 +276,12 @@ button:disabled {
 }
 
 .grow {
+  flex: 1 1 0;
   min-height: 150px;
 }
 
 .panel-title {
+  flex: 0 0 auto;
   justify-content: space-between;
 }
 
@@ -306,16 +337,28 @@ textarea:focus {
 .list {
   display: grid;
   gap: 8px;
+  min-height: 0;
+}
+
+.grow > .list {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
 }
 
 .list-item {
   display: grid;
+  align-content: start;
   gap: 3px;
+  min-width: 0;
+  min-height: 64px;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
+  line-height: 1.35;
   padding: 10px;
   text-align: left;
 }
@@ -327,9 +370,20 @@ textarea:focus {
 }
 
 .list-item strong {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.list-item .meta {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
 }
 
 .instructions-panel {
@@ -448,7 +502,7 @@ textarea:focus {
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-width: 0;
-  height: 100vh;
+  height: var(--app-height, 100vh);
   background: var(--chat-bg);
 }
 
@@ -764,7 +818,7 @@ dialog::backdrop {
 
   .app {
     grid-template-columns: 1fr;
-    height: 100dvh;
+    height: var(--app-height, 100vh);
     min-height: 0;
     overflow: hidden;
   }
@@ -773,7 +827,9 @@ dialog::backdrop {
   .right-panel {
     position: fixed;
     z-index: 30;
-    height: 100dvh;
+    height: var(--app-height, 100vh);
+    max-height: var(--app-height, 100vh);
+    background-attachment: scroll;
     border-bottom: 0;
     box-shadow: var(--shadow);
     transition: transform 160ms ease;
@@ -828,6 +884,22 @@ dialog::backdrop {
     z-index: 1000;
   }
 
+  .mobile-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    top: 12px;
+    right: 58px;
+    min-width: 72px;
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .mobile-mode-toggle[hidden] {
+    display: none;
+  }
+
   .sidebar-toggle {
     left: 12px;
   }
@@ -836,9 +908,59 @@ dialog::backdrop {
     right: 12px;
   }
 
-  .workspace {
-    height: 100dvh;
+  .app.mobile-simple .mobile-mode-toggle {
+    right: 12px;
+  }
+
+  .app.mobile-simple .right-panel,
+  .app.mobile-simple .right-panel-toggle {
+    display: none;
+  }
+
+  .app.mobile-simple:not(.right-panel-collapsed)::before {
+    content: none;
+  }
+
+  .app.mobile-simple .advanced-setting,
+  .app.mobile-simple .mobile-advanced {
+    display: none;
+  }
+
+  .app.mobile-simple.api-configured .api-credential-setting {
+    display: none;
+  }
+
+  .app.mobile-simple .sidebar {
+    width: min(86vw, 320px);
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .app.mobile-simple .brand {
+    padding-right: 0;
+  }
+
+  .app.mobile-simple .brand h1 {
+    font-size: 22px;
+  }
+
+  .app.mobile-simple .brand p {
+    display: none;
+  }
+
+  .app.mobile-simple .panel {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .app.mobile-simple .grow {
     min-height: 0;
+  }
+
+  .workspace {
+    height: var(--app-height, 100vh);
+    min-height: 0;
+    background-attachment: scroll;
   }
 
   .chat-header {
@@ -851,6 +973,22 @@ dialog::backdrop {
 
   .chat-header h2 {
     font-size: 18px;
+  }
+
+  .app.mobile-simple .chat-header {
+    display: flex;
+    align-items: center;
+    min-height: 64px;
+    padding: 10px 88px 10px 58px;
+  }
+
+  .app.mobile-simple .chat-header h2 {
+    font-size: 17px;
+  }
+
+  .app.mobile-simple .chat-header p,
+  .app.mobile-simple .chat-header-actions {
+    display: none;
   }
 
   .chat-header-actions {
@@ -877,9 +1015,24 @@ dialog::backdrop {
     padding: 12px;
   }
 
+  .app.mobile-simple .messages {
+    padding: 10px;
+  }
+
   .message {
     margin-bottom: 12px;
     padding: 12px;
+  }
+
+  .app.mobile-simple .message {
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 10px 11px;
+  }
+
+  .app.mobile-simple .message.user,
+  .app.mobile-simple .message.assistant {
+    border-left-width: 3px;
   }
 
   .message-head {
@@ -887,23 +1040,70 @@ dialog::backdrop {
     grid-template-columns: 1fr;
   }
 
+  .app.mobile-simple .message-head {
+    display: block;
+  }
+
   .message-actions {
     justify-content: flex-start;
   }
 
+  .app.mobile-simple .message-actions {
+    display: none;
+  }
+
+  .app.mobile-simple .thinking-block {
+    padding: 9px 10px;
+  }
+
   .composer {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: stretch;
     gap: 8px;
-    padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+    padding: 10px 12px;
+    padding-bottom: max(10px, min(env(safe-area-inset-bottom, 0px), 34px));
   }
 
   .composer textarea {
-    min-height: 82px;
+    height: 56px;
+    min-height: 56px;
+    max-height: 120px;
+    resize: none;
+  }
+
+  .composer button {
+    min-height: 56px;
+  }
+
+  .app.mobile-simple .composer {
+    gap: 7px;
+    padding: 8px;
+    padding-bottom: max(8px, min(env(safe-area-inset-bottom, 0px), 30px));
+  }
+
+  .app.mobile-simple .composer textarea {
+    height: 52px;
+    min-height: 52px;
+    padding: 10px;
+  }
+
+  .app.mobile-simple .composer button {
+    width: 50px;
+    min-width: 50px;
+    min-height: 52px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .app.mobile-simple .composer button::before {
+    content: "↑";
+    font-size: 22px;
+    line-height: 1;
   }
 
   dialog {
     width: calc(100vw - 20px);
-    max-height: calc(100dvh - 20px);
+    max-height: calc(var(--app-height, 100vh) - 20px);
     overflow: auto;
   }
 
@@ -932,6 +1132,7 @@ dialog::backdrop {
 
   .chat-item {
     grid-template-columns: minmax(0, 1fr);
+    min-height: 112px;
   }
 
   .chat-item-actions {

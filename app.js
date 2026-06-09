@@ -109,6 +109,46 @@ let availableThemes = [...fallbackThemes];
 const activeThinkingMessageIds = new Set();
 const transientThoughts = new Map();
 const streamingRenderCache = new Map();
+const mobileViewportQuery = window.matchMedia?.("(max-width: 860px)") || null;
+let viewportHeightFrame = 0;
+
+function syncViewportHeight() {
+  const viewportHeight =
+    window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+  if (!viewportHeight) return;
+  document.documentElement.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
+}
+
+function scheduleViewportHeightSync() {
+  if (viewportHeightFrame) return;
+  viewportHeightFrame = requestAnimationFrame(() => {
+    viewportHeightFrame = 0;
+    syncViewportHeight();
+  });
+}
+
+function bindViewportHeightSync() {
+  syncViewportHeight();
+  window.addEventListener("resize", scheduleViewportHeightSync, { passive: true });
+  window.addEventListener("orientationchange", scheduleViewportHeightSync, { passive: true });
+  window.addEventListener("pageshow", scheduleViewportHeightSync, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleViewportHeightSync, { passive: true });
+}
+
+function bindResponsiveModeSync() {
+  const handleViewportModeChange = () => {
+    if (isMobileSimpleMode()) {
+      state.sidebarCollapsed = true;
+      state.rightPanelCollapsed = true;
+    }
+    render();
+  };
+  if (mobileViewportQuery?.addEventListener) {
+    mobileViewportQuery.addEventListener("change", handleViewportModeChange);
+  } else {
+    mobileViewportQuery?.addListener?.(handleViewportModeChange);
+  }
+}
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -135,6 +175,7 @@ const defaultState = {
   instructionPresetsEnabled: false,
   activeInstructionPresetId: "",
   instructionPresets: [],
+  mobileFullMode: false,
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
   characters: [
@@ -170,6 +211,7 @@ const el = {
   searxngUrl: document.querySelector("#searxngUrl"),
   searxngMaxResults: document.querySelector("#searxngMaxResults"),
   rightPanelToggle: document.querySelector("#rightPanelToggle"),
+  mobileModeToggle: document.querySelector("#mobileModeToggle"),
   instructionPresetStatus: document.querySelector("#instructionPresetStatus"),
   instructionPresetsEnabled: document.querySelector("#instructionPresetsEnabled"),
   instructionPresetSelect: document.querySelector("#instructionPresetSelect"),
@@ -215,13 +257,19 @@ function loadState() {
       loaded.activeInstructionPresetId = loaded.instructionPresets[0]?.id || "";
     }
     if (!loaded.activeInstructionPresetId) loaded.instructionPresetsEnabled = false;
-    if (!stored && isMobileViewport()) {
+    loaded.mobileFullMode = Boolean(loaded.mobileFullMode);
+    if (isMobileViewport() && !loaded.mobileFullMode) {
       loaded.sidebarCollapsed = true;
       loaded.rightPanelCollapsed = true;
     }
     return loaded;
   } catch {
-    return structuredClone(defaultState);
+    const fallback = structuredClone(defaultState);
+    if (isMobileViewport()) {
+      fallback.sidebarCollapsed = true;
+      fallback.rightPanelCollapsed = true;
+    }
+    return fallback;
   }
 }
 
@@ -372,7 +420,11 @@ function activeInstructionPreset() {
 }
 
 function isMobileViewport() {
-  return window.matchMedia?.("(max-width: 860px)").matches;
+  return Boolean(mobileViewportQuery?.matches);
+}
+
+function isMobileSimpleMode() {
+  return isMobileViewport() && !state.mobileFullMode;
 }
 
 function closeSidebarOnMobile() {
@@ -403,15 +455,30 @@ function deleteChatById(id) {
 }
 
 function render(options = {}) {
+  const mobileViewport = isMobileViewport();
+  const mobileSimpleMode = isMobileSimpleMode();
+  const effectiveRightPanelCollapsed = mobileSimpleMode
+    ? true
+    : Boolean(state.rightPanelCollapsed);
+
   document.documentElement.dataset.theme = state.theme;
   applyActiveTheme();
+  el.app.classList.toggle("mobile-simple", mobileSimpleMode);
+  el.app.classList.toggle("mobile-full", mobileViewport && state.mobileFullMode);
+  el.app.classList.toggle("api-configured", Boolean(state.apiUrl && state.apiKey));
   el.app.classList.toggle("sidebar-collapsed", Boolean(state.sidebarCollapsed));
-  el.app.classList.toggle("right-panel-collapsed", Boolean(state.rightPanelCollapsed));
+  el.app.classList.toggle("right-panel-collapsed", effectiveRightPanelCollapsed);
   el.sidebarToggle.title = state.sidebarCollapsed ? "Показать левую панель" : "Скрыть левую панель";
-  el.rightPanelToggle.title = state.rightPanelCollapsed
+  el.rightPanelToggle.title = effectiveRightPanelCollapsed
     ? "Показать правую панель"
     : "Скрыть правую панель";
-  el.rightPanelToggle.textContent = state.rightPanelCollapsed ? "Инструкции" : "×";
+  el.rightPanelToggle.textContent = effectiveRightPanelCollapsed ? "Инструкции" : "×";
+  el.mobileModeToggle.hidden = !mobileViewport;
+  el.mobileModeToggle.textContent = state.mobileFullMode ? "Простой" : "Полный";
+  el.mobileModeToggle.title = state.mobileFullMode
+    ? "Включить простой мобильный интерфейс"
+    : "Включить полный мобильный интерфейс";
+  el.mobileModeToggle.setAttribute("aria-pressed", String(state.mobileFullMode));
   el.apiUrl.value = state.apiUrl;
   el.apiKey.value = state.apiKey;
   el.apiStatus.textContent = state.apiUrl && state.apiKey ? "готово" : "не настроено";
@@ -2033,6 +2100,15 @@ el.rightPanelToggle.addEventListener("click", () => {
   render();
 });
 
+el.mobileModeToggle.addEventListener("click", () => {
+  state.mobileFullMode = !state.mobileFullMode;
+  if (isMobileViewport()) {
+    state.rightPanelCollapsed = true;
+    if (!state.mobileFullMode) state.sidebarCollapsed = true;
+  }
+  render();
+});
+
 el.themeSelect.addEventListener("change", () => {
   state.theme = el.themeSelect.value;
   render();
@@ -2246,4 +2322,6 @@ el.messageInput.addEventListener("keydown", (event) => {
   }
 });
 
+bindViewportHeightSync();
+bindResponsiveModeSync();
 loadThemes();

@@ -2,9 +2,12 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>RPUI</title>
-    <link rel="stylesheet" href="./styles.css?v=5" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
   </head>
   <body>
     <div class="app">
@@ -16,29 +19,29 @@
           </div>
         </div>
 
-        <section class="panel">
+        <section class="panel api-panel">
           <div class="panel-title">
             <h2>API</h2>
             <span id="apiStatus" class="status">не настроено</span>
           </div>
-          <label>
+          <label class="api-credential-setting">
             URL
             <input id="apiUrl" type="url" placeholder="https://api.example.com/v1" autocomplete="off" />
           </label>
-          <label>
+          <label class="api-credential-setting">
             Ключ
             <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
           </label>
-          <button id="toggleApiKey" class="ghost" type="button">Показать ключ</button>
+          <button id="toggleApiKey" class="ghost api-credential-setting" type="button">Показать ключ</button>
           <div class="row">
             <select id="modelSelect" aria-label="Модель"></select>
             <button id="loadModels" type="button">Модели</button>
           </div>
-          <label class="checkbox-row">
+          <label class="checkbox-row advanced-setting">
             <input id="webSearchEnabled" type="checkbox" />
             Интернет-поиск
           </label>
-          <label>
+          <label class="advanced-setting">
             Режим поиска
             <select id="webSearchMode">
               <option value="openai">OpenAI web_search_preview</option>
@@ -46,22 +49,22 @@
               <option value="searxng">SearXNG бесплатно</option>
             </select>
           </label>
-          <label class="searxng-setting">
+          <label class="searxng-setting advanced-setting">
             SearXNG URL
             <input id="searxngUrl" type="url" placeholder="http://localhost:8088" autocomplete="off" />
           </label>
-          <label class="searxng-setting">
+          <label class="searxng-setting advanced-setting">
             Результатов
             <input id="searxngMaxResults" type="number" min="1" max="10" step="1" />
           </label>
-          <label>
+          <label class="advanced-setting">
             Когда искать
             <select id="webSearchPolicy">
               <option value="auto">По необходимости</option>
               <option value="always">При каждом сообщении</option>
             </select>
           </label>
-          <label>
+          <label class="advanced-setting">
             Разрешить HTML в сообщениях
             <select id="messageHtmlMode">
               <option value="off">Выключено</option>
@@ -71,7 +74,7 @@
           </label>
         </section>
 
-        <section class="panel">
+        <section class="panel mobile-advanced">
           <div class="panel-title">
             <h2>Тема</h2>
             <span id="themeStatus" class="status">загрузка</span>
@@ -99,6 +102,15 @@
         </section>
       </aside>
       <button id="sidebarToggle" class="sidebar-toggle" type="button" title="Скрыть левую панель">☰</button>
+      <button
+        id="mobileModeToggle"
+        class="mobile-mode-toggle ghost"
+        type="button"
+        aria-pressed="false"
+        title="Включить полный мобильный интерфейс"
+      >
+        Полный
+      </button>
 
       <main class="workspace">
         <header class="chat-header">
@@ -179,6 +191,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
-    <script src="./app.js?v=5"></script>
+    <script src="./app.js?v=7"></script>
   </body>
 </html>
