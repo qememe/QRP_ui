@@ -1,0 +1,14 @@
+{
+  "name": "rpui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightweight RP chat UI with an optional Node.js API proxy.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

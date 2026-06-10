@@ -1,5 +1,7 @@
 const STORAGE_KEY = "rpui-state-v1";
 const THEMES_INDEX_URL = "./themes/index.json";
+const BACKEND_CONFIG_URL = "./api/config";
+const BACKUP_APP_ID = "RPUI";
 const fallbackThemes = [
   { id: "light", name: "Белая", path: "./themes/light/", colors: {} },
   { id: "dark", name: "Тёмная", path: "./themes/dark/", colors: {} },
@@ -169,6 +171,7 @@ const defaultState = {
   webSearchEnabled: false,
   webSearchMode: "openai",
   webSearchPolicy: "auto",
+  useServerApi: true,
   messageHtmlMode: "safe",
   searxngUrl: getDefaultSearxngUrl(),
   searxngMaxResults: 5,
@@ -178,6 +181,7 @@ const defaultState = {
   mobileFullMode: false,
   sidebarCollapsed: false,
   rightPanelCollapsed: false,
+  chatSearch: "",
   characters: [
     {
       id: createId(),
@@ -191,6 +195,15 @@ const defaultState = {
 };
 
 let state = loadState();
+let serverConfig = {
+  available: false,
+  apiConfigured: false,
+  apiBaseUrl: "",
+  defaultModel: "",
+  searxngConfigured: false,
+  searxngUrl: "",
+  features: [],
+};
 
 const el = {
   app: document.querySelector(".app"),
@@ -202,6 +215,8 @@ const el = {
   apiUrl: document.querySelector("#apiUrl"),
   apiKey: document.querySelector("#apiKey"),
   toggleApiKey: document.querySelector("#toggleApiKey"),
+  serverStatus: document.querySelector("#serverStatus"),
+  useServerApi: document.querySelector("#useServerApi"),
   modelSelect: document.querySelector("#modelSelect"),
   loadModels: document.querySelector("#loadModels"),
   webSearchEnabled: document.querySelector("#webSearchEnabled"),
@@ -221,6 +236,7 @@ const el = {
   instructionPresetFile: document.querySelector("#instructionPresetFile"),
   charactersList: document.querySelector("#charactersList"),
   chatsList: document.querySelector("#chatsList"),
+  chatSearch: document.querySelector("#chatSearch"),
   newCharacter: document.querySelector("#newCharacter"),
   newChat: document.querySelector("#newChat"),
   renameChat: document.querySelector("#renameChat"),
@@ -242,39 +258,202 @@ const el = {
   characterSystem: document.querySelector("#characterSystem"),
   deleteCharacter: document.querySelector("#deleteCharacter"),
   cancelCharacter: document.querySelector("#cancelCharacter"),
+  backupStatus: document.querySelector("#backupStatus"),
+  exportBackup: document.querySelector("#exportBackup"),
+  importBackup: document.querySelector("#importBackup"),
+  backupFile: document.querySelector("#backupFile"),
+  clearAllData: document.querySelector("#clearAllData"),
 };
 
 function loadState() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    const loaded = { ...defaultState, ...JSON.parse(stored || "{}") };
-    if (!loaded.searxngUrl) loaded.searxngUrl = getDefaultSearxngUrl();
-    if (!htmlRenderModes.has(loaded.messageHtmlMode)) loaded.messageHtmlMode = "safe";
-    loaded.instructionPresets = Array.isArray(loaded.instructionPresets)
-      ? loaded.instructionPresets.map(normalizeInstructionPreset).filter(Boolean)
-      : [];
-    if (!loaded.instructionPresets.some((preset) => preset.id === loaded.activeInstructionPresetId)) {
-      loaded.activeInstructionPresetId = loaded.instructionPresets[0]?.id || "";
-    }
-    if (!loaded.activeInstructionPresetId) loaded.instructionPresetsEnabled = false;
-    loaded.mobileFullMode = Boolean(loaded.mobileFullMode);
-    if (isMobileViewport() && !loaded.mobileFullMode) {
-      loaded.sidebarCollapsed = true;
-      loaded.rightPanelCollapsed = true;
-    }
-    return loaded;
+    return normalizeState(JSON.parse(stored || "{}"));
   } catch {
-    const fallback = structuredClone(defaultState);
-    if (isMobileViewport()) {
-      fallback.sidebarCollapsed = true;
-      fallback.rightPanelCollapsed = true;
-    }
-    return fallback;
+    return normalizeState({});
   }
+}
+
+function normalizeState(data) {
+  const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const loaded = { ...structuredClone(defaultState), ...source };
+  if (!loaded.searxngUrl) loaded.searxngUrl = getDefaultSearxngUrl();
+  if (!htmlRenderModes.has(loaded.messageHtmlMode)) loaded.messageHtmlMode = "safe";
+  if (!["openai", "openrouter", "searxng"].includes(loaded.webSearchMode)) {
+    loaded.webSearchMode = "openai";
+  }
+  if (!["auto", "always"].includes(loaded.webSearchPolicy)) loaded.webSearchPolicy = "auto";
+  loaded.useServerApi = loaded.useServerApi !== false;
+  loaded.searxngMaxResults = clampNumber(loaded.searxngMaxResults, 1, 10);
+  loaded.chatSearch = String(loaded.chatSearch || "");
+  loaded.models = Array.isArray(loaded.models) ? loaded.models.filter(Boolean).map(String) : [];
+  loaded.characters = Array.isArray(loaded.characters)
+    ? loaded.characters
+        .map((character) => ({
+          id: String(character?.id || createId()),
+          name: String(character?.name || "Персонаж").slice(0, 80),
+          system: String(character?.system || ""),
+        }))
+        .filter((character) => character.name)
+    : [];
+  if (!loaded.characters.length) loaded.characters = structuredClone(defaultState.characters);
+  loaded.chats = Array.isArray(loaded.chats)
+    ? loaded.chats
+        .map(normalizeChat)
+        .filter(
+          (chat) => chat && loaded.characters.some((character) => character.id === chat.characterId),
+        )
+    : [];
+  if (!loaded.chats.some((chat) => chat.id === loaded.activeChatId)) {
+    loaded.activeChatId = loaded.chats[0]?.id || null;
+  }
+  loaded.instructionPresets = Array.isArray(loaded.instructionPresets)
+    ? loaded.instructionPresets.map(normalizeInstructionPreset).filter(Boolean)
+    : [];
+  if (!loaded.instructionPresets.some((preset) => preset.id === loaded.activeInstructionPresetId)) {
+    loaded.activeInstructionPresetId = loaded.instructionPresets[0]?.id || "";
+  }
+  if (!loaded.activeInstructionPresetId) loaded.instructionPresetsEnabled = false;
+  loaded.mobileFullMode = Boolean(loaded.mobileFullMode);
+  if (isMobileViewport() && !loaded.mobileFullMode) {
+    loaded.sidebarCollapsed = true;
+    loaded.rightPanelCollapsed = true;
+  }
+  return loaded;
+}
+
+function normalizeChat(chat) {
+  if (!chat || typeof chat !== "object") return null;
+  return {
+    id: String(chat.id || createId()),
+    characterId: String(chat.characterId || ""),
+    title: String(chat.title || "Чат").slice(0, 120),
+    createdAt: chat.createdAt || new Date().toISOString(),
+    messages: Array.isArray(chat.messages) ? chat.messages.map(normalizeMessage).filter(Boolean) : [],
+  };
+}
+
+function normalizeMessage(message) {
+  if (!message || typeof message !== "object") return null;
+  const role = ["user", "assistant", "system"].includes(message.role) ? message.role : "user";
+  const normalized = {
+    id: String(message.id || createId()),
+    role,
+    content: String(message.content || ""),
+  };
+  if (role === "assistant") {
+    const variants = Array.isArray(message.variants)
+      ? message.variants.filter((variant) => typeof variant === "string")
+      : [];
+    if (variants.length) {
+      normalized.variants = variants;
+      normalized.variantIndex = clampNumber(message.variantIndex ?? 0, 0, variants.length - 1);
+    }
+  }
+  return normalized;
 }
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+async function loadServerConfig() {
+  try {
+    const response = await fetch(BACKEND_CONFIG_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    applyServerConfig(await response.json());
+  } catch {
+    serverConfig = {
+      available: false,
+      apiConfigured: false,
+      apiBaseUrl: "",
+      defaultModel: "",
+      searxngConfigured: false,
+      searxngUrl: "",
+      features: [],
+    };
+  } finally {
+    render();
+  }
+}
+
+function applyServerConfig(data) {
+  serverConfig = {
+    available: true,
+    apiConfigured: Boolean(data.apiConfigured),
+    apiBaseUrl: String(data.apiBaseUrl || ""),
+    defaultModel: String(data.defaultModel || ""),
+    searxngConfigured: Boolean(data.searxngConfigured),
+    searxngUrl: String(data.searxngUrl || ""),
+    features: Array.isArray(data.features) ? data.features.map(String) : [],
+  };
+  if (serverConfig.apiBaseUrl && !state.apiUrl) {
+    state.apiUrl = serverConfig.apiBaseUrl;
+  }
+  if (serverConfig.defaultModel && !state.selectedModel) {
+    state.selectedModel = serverConfig.defaultModel;
+  }
+  if (serverConfig.searxngUrl && state.searxngUrl === getDefaultSearxngUrl()) {
+    state.searxngUrl = serverConfig.searxngUrl;
+  }
+}
+
+function isServerApiAvailable() {
+  return Boolean(serverConfig.available && serverConfig.apiConfigured);
+}
+
+function isServerApiActive() {
+  return Boolean(state.useServerApi && isServerApiAvailable());
+}
+
+function hasApiTransport() {
+  return isServerApiActive() || Boolean(state.apiUrl && state.apiKey);
+}
+
+function getApiRequestUrl(path) {
+  return isServerApiActive() ? `./api${path}` : getEndpoint(path);
+}
+
+function getApiRequestHeaders(headers = {}) {
+  const requestHeaders = { ...headers };
+  if (!isServerApiActive()) {
+    requestHeaders.Authorization = `Bearer ${state.apiKey}`;
+  }
+  return requestHeaders;
+}
+
+async function saveServerConfigFromInputs(options = {}) {
+  const { requireApi = false, quiet = false } = options;
+  if (!serverConfig.available || !state.useServerApi) return false;
+
+  syncApiSettingsFromInputs();
+  const apiBaseUrl = state.apiUrl || serverConfig.apiBaseUrl;
+  const payload = {};
+  if (apiBaseUrl) payload.apiBaseUrl = apiBaseUrl;
+  if (state.apiKey) payload.apiKey = state.apiKey;
+  if (state.selectedModel) payload.defaultModel = state.selectedModel;
+  if (state.searxngUrl) payload.searxngUrl = state.searxngUrl;
+
+  if (requireApi) {
+    if (!apiBaseUrl) throw new Error("укажите URL API");
+    if (!state.apiKey && !serverConfig.apiConfigured) throw new Error("укажите API ключ");
+  }
+  if (!Object.keys(payload).length) return false;
+
+  if (!quiet) setStatus("сохраняю .env...");
+  const response = await fetch("./api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await getApiErrorMessage(response));
+  applyServerConfig(await response.json());
+  if (state.apiKey) {
+    state.apiKey = "";
+    el.apiKey.value = "";
+  }
+  saveState();
+  return true;
 }
 
 async function loadThemes() {
@@ -376,6 +555,12 @@ function setThemeStatus(text) {
   el.themeStatus.textContent = text;
 }
 
+function getServerStatusText() {
+  if (!serverConfig.available) return "нет";
+  if (!serverConfig.apiConfigured) return ".env без ключа";
+  return serverConfig.defaultModel ? `готов: ${serverConfig.defaultModel}` : "готов";
+}
+
 function normalizeApiUrl(url) {
   return url.trim().replace(/\/+$/, "");
 }
@@ -457,6 +642,7 @@ function deleteChatById(id) {
 function render(options = {}) {
   const mobileViewport = isMobileViewport();
   const mobileSimpleMode = isMobileSimpleMode();
+  const serverApiActive = isServerApiActive();
   const effectiveRightPanelCollapsed = mobileSimpleMode
     ? true
     : Boolean(state.rightPanelCollapsed);
@@ -465,7 +651,8 @@ function render(options = {}) {
   applyActiveTheme();
   el.app.classList.toggle("mobile-simple", mobileSimpleMode);
   el.app.classList.toggle("mobile-full", mobileViewport && state.mobileFullMode);
-  el.app.classList.toggle("api-configured", Boolean(state.apiUrl && state.apiKey));
+  el.app.classList.toggle("api-configured", Boolean(serverApiActive || (state.apiUrl && state.apiKey)));
+  el.app.classList.toggle("server-api-active", serverApiActive);
   el.app.classList.toggle("sidebar-collapsed", Boolean(state.sidebarCollapsed));
   el.app.classList.toggle("right-panel-collapsed", effectiveRightPanelCollapsed);
   el.sidebarToggle.title = state.sidebarCollapsed ? "Показать левую панель" : "Скрыть левую панель";
@@ -481,7 +668,17 @@ function render(options = {}) {
   el.mobileModeToggle.setAttribute("aria-pressed", String(state.mobileFullMode));
   el.apiUrl.value = state.apiUrl;
   el.apiKey.value = state.apiKey;
-  el.apiStatus.textContent = state.apiUrl && state.apiKey ? "готово" : "не настроено";
+  el.apiUrl.disabled = serverApiActive;
+  el.apiKey.disabled = serverApiActive;
+  el.toggleApiKey.disabled = serverApiActive;
+  el.apiStatus.textContent = serverApiActive
+    ? "серверный API"
+    : state.apiUrl && state.apiKey
+      ? "готово"
+      : "не настроено";
+  el.serverStatus.textContent = getServerStatusText();
+  el.useServerApi.checked = Boolean(state.useServerApi && serverConfig.available);
+  el.useServerApi.disabled = !serverConfig.available;
   el.webSearchEnabled.checked = Boolean(state.webSearchEnabled);
   el.webSearchMode.value = state.webSearchMode;
   el.webSearchPolicy.value = state.webSearchPolicy;
@@ -490,6 +687,10 @@ function render(options = {}) {
   el.webSearchPolicy.disabled = !state.webSearchEnabled;
   el.searxngUrl.value = state.searxngUrl;
   el.searxngMaxResults.value = state.searxngMaxResults;
+  if (document.activeElement !== el.chatSearch) {
+    el.chatSearch.value = state.chatSearch;
+  }
+  el.backupStatus.textContent = `${state.chats.length} чатов`;
   const searxngDisabled = !state.webSearchEnabled || state.webSearchMode !== "searxng";
   el.searxngUrl.disabled = searxngDisabled;
   el.searxngMaxResults.disabled = searxngDisabled;
@@ -512,10 +713,14 @@ function renderThemes() {
 
 function renderModels() {
   el.modelSelect.innerHTML = "";
-  if (!state.models.length) {
+  const models = [...state.models];
+  if (state.selectedModel && !models.includes(state.selectedModel)) {
+    models.unshift(state.selectedModel);
+  }
+  if (!models.length) {
     el.modelSelect.append(new Option("Модель не загружена", ""));
   }
-  state.models.forEach((model) => {
+  models.forEach((model) => {
     el.modelSelect.append(new Option(model, model, false, model === state.selectedModel));
   });
 }
@@ -623,7 +828,15 @@ function renderCharacters() {
 
 function renderChats() {
   el.chatsList.innerHTML = "";
-  state.chats.forEach((chat) => {
+  const chats = state.chats.filter(chatMatchesSearch);
+  if (!chats.length) {
+    el.chatsList.innerHTML = state.chatSearch
+      ? '<div class="empty-state">Поиск ничего не нашел</div>'
+      : '<div class="empty-state">Чатов пока нет</div>';
+    return;
+  }
+
+  chats.forEach((chat) => {
     const character = characterById(chat.characterId);
     const item = document.createElement("div");
     item.className = `list-item chat-item ${chat.id === state.activeChatId ? "active" : ""}`;
@@ -653,6 +866,20 @@ function renderChats() {
     });
     el.chatsList.append(item);
   });
+}
+
+function chatMatchesSearch(chat) {
+  const query = state.chatSearch.trim().toLowerCase();
+  if (!query) return true;
+  const character = characterById(chat.characterId);
+  const haystack = [
+    chat.title,
+    character?.name,
+    ...(chat.messages || []).map((message) => getMessageContent(message)),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(query);
 }
 
 function renderChatCharacterSelect() {
@@ -855,7 +1082,7 @@ async function importInstructionPresetFile(event) {
   if (!file) return;
 
   try {
-    const data = JSON.parse(await file.text());
+    const data = parseJsonFileText(await file.text());
     const preset = parseInstructionPresetJson(data, file.name);
     state.instructionPresets.unshift(preset);
     state.activeInstructionPresetId = preset.id;
@@ -866,6 +1093,20 @@ async function importInstructionPresetFile(event) {
     el.instructionPresetStatus.textContent = `ошибка: ${error.message}`;
   } finally {
     el.instructionPresetFile.value = "";
+  }
+}
+
+function parseJsonFileText(text) {
+  try {
+    return JSON.parse(text);
+  } catch (originalError) {
+    const start = String(text).search(/[\[{]/);
+    if (start <= 0) throw originalError;
+    try {
+      return JSON.parse(String(text).slice(start));
+    } catch {
+      throw originalError;
+    }
   }
 }
 
@@ -1003,8 +1244,16 @@ function stripSillyTavernComments(content) {
 }
 
 async function loadModels() {
-  syncApiSettingsFromInputs();
-  if (!state.apiUrl || !state.apiKey) {
+  if (state.useServerApi && serverConfig.available) {
+    try {
+      await saveServerConfigFromInputs({ requireApi: true });
+    } catch (error) {
+      setStatus(`.env: ${error.message}`);
+      return;
+    }
+  }
+  if (!isServerApiActive()) syncApiSettingsFromInputs();
+  if (!isServerApiActive() && (!state.apiUrl || !state.apiKey)) {
     setStatus("укажите URL и ключ");
     return;
   }
@@ -1013,8 +1262,8 @@ async function loadModels() {
   setStatus(statusText);
   el.loadModels.disabled = true;
   try {
-    const response = await fetch(getEndpoint("/models"), {
-      headers: { Authorization: `Bearer ${state.apiKey}` },
+    const response = await fetch(getApiRequestUrl("/models"), {
+      headers: getApiRequestHeaders(),
     });
     if (!response.ok) throw new Error(await getApiErrorMessage(response));
     const data = await response.json();
@@ -1176,12 +1425,16 @@ function replacePromptMacros(content, context, variables) {
 
 async function sendMessage(event) {
   event.preventDefault();
-  syncApiSettingsFromInputs();
+  if (!isServerApiActive()) syncApiSettingsFromInputs();
   const chat = activeChat();
   const content = el.messageInput.value.trim();
   if (!chat || !content) return;
   if (!state.selectedModel) {
     setStatus("выберите модель");
+    return;
+  }
+  if (!hasApiTransport()) {
+    setStatus("настройте API или запустите Node-сервер с .env");
     return;
   }
 
@@ -1248,13 +1501,12 @@ async function generateAssistantResponse(chat, assistantMessage, history, latest
   });
   logRequestSummary(requestSummary, payload);
   setStatus("запрос...");
-  const response = await fetch(getEndpoint("/chat/completions"), {
+  const response = await fetch(getApiRequestUrl("/chat/completions"), {
     method: "POST",
-    headers: {
+    headers: getApiRequestHeaders({
       Accept: "text/event-stream",
       "Content-Type": "application/json",
-      Authorization: `Bearer ${state.apiKey}`,
-    },
+    }),
     body: requestSummary.body,
   });
   if (!response.ok) throw new Error(await getApiErrorMessage(response));
@@ -1317,12 +1569,11 @@ async function getSearxngSearchDecision(messages, fallbackQuery) {
 
   try {
     const recentMessages = messages.slice(-8).map(({ role, content }) => ({ role, content }));
-    const response = await fetch(getEndpoint("/chat/completions"), {
+    const response = await fetch(getApiRequestUrl("/chat/completions"), {
       method: "POST",
-      headers: {
+      headers: getApiRequestHeaders({
         "Content-Type": "application/json",
-        Authorization: `Bearer ${state.apiKey}`,
-      },
+      }),
       body: JSON.stringify({
         model: state.selectedModel,
         temperature: 0,
@@ -1373,11 +1624,17 @@ async function getSearxngSearchContext(query) {
     throw new Error("укажите SearXNG URL для бесплатного поиска");
   }
 
-  const url = new URL("/search", normalizeSearxngUrl(state.searxngUrl));
+  const url = isServerApiActive()
+    ? new URL("./api/searxng/search", window.location.href)
+    : new URL("/search", normalizeSearxngUrl(state.searxngUrl));
   url.searchParams.set("q", query);
-  url.searchParams.set("format", "json");
   url.searchParams.set("language", "ru");
   url.searchParams.set("safesearch", "0");
+  if (isServerApiActive()) {
+    url.searchParams.set("url", normalizeSearxngUrl(state.searxngUrl));
+  } else {
+    url.searchParams.set("format", "json");
+  }
 
   const response = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
@@ -1704,7 +1961,7 @@ function normalizeReasoningText(value) {
 }
 
 async function regenerateAssistantMessage(node) {
-  syncApiSettingsFromInputs();
+  if (!isServerApiActive()) syncApiSettingsFromInputs();
   const chat = activeChat();
   const messageIndex = chat?.messages.findIndex((item) => item.id === node.dataset.messageId) ?? -1;
   const assistantMessage = messageIndex >= 0 ? chat.messages[messageIndex] : null;
@@ -1712,6 +1969,10 @@ async function regenerateAssistantMessage(node) {
   if (activeThinkingMessageIds.has(assistantMessage.id)) return;
   if (!state.selectedModel) {
     setStatus("выберите модель");
+    return;
+  }
+  if (!hasApiTransport()) {
+    setStatus("настройте API или запустите Node-сервер с .env");
     return;
   }
 
@@ -2090,6 +2351,84 @@ function renderMarkdownBlocks(text, allowHtml = false) {
   return html.join("");
 }
 
+function exportBackup() {
+  const backupState = structuredClone(state);
+  backupState.apiKey = "";
+  const exportedAt = new Date().toISOString();
+  const backup = {
+    app: BACKUP_APP_ID,
+    version: 1,
+    exportedAt,
+    state: backupState,
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `rpui-backup-${exportedAt.slice(0, 10)}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  el.backupStatus.textContent = "экспортировано";
+}
+
+async function importBackupFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  try {
+    const data = JSON.parse(await file.text());
+    const importedState = getBackupState(data);
+    const currentApiKey = state.apiKey;
+    state = normalizeState(importedState);
+    state.apiKey = currentApiKey;
+    if (serverConfig.defaultModel && !state.selectedModel) {
+      state.selectedModel = serverConfig.defaultModel;
+    }
+    render();
+    el.backupStatus.textContent = "импортировано";
+  } catch (error) {
+    el.backupStatus.textContent = `ошибка: ${error.message}`;
+  } finally {
+    el.backupFile.value = "";
+  }
+}
+
+function getBackupState(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("JSON должен быть объектом");
+  }
+  if (data.app === BACKUP_APP_ID && data.state && typeof data.state === "object") {
+    return data.state;
+  }
+  if (Array.isArray(data.characters) || Array.isArray(data.chats)) {
+    return data;
+  }
+  throw new Error("это не похоже на бэкап RPUI");
+}
+
+function clearAllData() {
+  const confirmed = confirm("Удалить все локальные чаты, персонажей, пресеты и настройки?");
+  if (!confirmed) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state = normalizeState({});
+  if (serverConfig.defaultModel) state.selectedModel = serverConfig.defaultModel;
+  render();
+  el.backupStatus.textContent = "сброшено";
+}
+
+function saveServerConfigAfterEdit() {
+  if (!serverConfig.available || !state.useServerApi) return;
+  saveServerConfigFromInputs({ quiet: true })
+    .then((saved) => {
+      if (saved) render();
+    })
+    .catch((error) => setStatus(`.env: ${error.message}`));
+}
+
 el.sidebarToggle.addEventListener("click", () => {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   render();
@@ -2119,7 +2458,11 @@ el.reloadThemes.addEventListener("click", loadThemes);
 el.apiUrl.addEventListener("change", () => {
   state.apiUrl = normalizeApiUrl(el.apiUrl.value);
   render();
-  if (state.apiUrl && state.apiKey) loadModels();
+  if (serverConfig.available && state.useServerApi) {
+    saveServerConfigAfterEdit();
+  } else if (state.apiUrl && state.apiKey) {
+    loadModels();
+  }
 });
 
 el.apiUrl.addEventListener("input", () => {
@@ -2131,7 +2474,11 @@ el.apiKey.addEventListener("change", () => {
   state.apiKey = normalizeApiKey(el.apiKey.value);
   el.apiKey.value = state.apiKey;
   render();
-  if (state.apiUrl && state.apiKey) loadModels();
+  if (serverConfig.available && state.useServerApi) {
+    saveServerConfigAfterEdit();
+  } else if (state.apiUrl && state.apiKey) {
+    loadModels();
+  }
 });
 
 el.apiKey.addEventListener("input", () => {
@@ -2145,9 +2492,22 @@ el.toggleApiKey.addEventListener("click", () => {
   el.toggleApiKey.textContent = isPassword ? "Скрыть ключ" : "Показать ключ";
 });
 
+el.useServerApi.addEventListener("change", () => {
+  state.useServerApi = el.useServerApi.checked;
+  render();
+  if (!state.useServerApi || !serverConfig.available) return;
+  saveServerConfigFromInputs({ quiet: true })
+    .then(() => {
+      render();
+      if (isServerApiActive()) loadModels();
+    })
+    .catch((error) => setStatus(`.env: ${error.message}`));
+});
+
 el.modelSelect.addEventListener("change", () => {
   state.selectedModel = el.modelSelect.value;
   render();
+  saveServerConfigAfterEdit();
 });
 
 el.webSearchEnabled.addEventListener("change", () => {
@@ -2178,6 +2538,7 @@ el.searxngUrl.addEventListener("input", () => {
 el.searxngUrl.addEventListener("change", () => {
   state.searxngUrl = normalizeSearxngUrl(el.searxngUrl.value);
   render();
+  saveServerConfigAfterEdit();
 });
 
 el.searxngMaxResults.addEventListener("input", () => {
@@ -2231,6 +2592,11 @@ el.deleteInstructionPreset.addEventListener("click", () => {
 el.loadModels.addEventListener("click", loadModels);
 el.newCharacter.addEventListener("click", () => openCharacterDialog());
 el.cancelCharacter.addEventListener("click", () => el.characterDialog.close());
+
+el.chatSearch.addEventListener("input", () => {
+  state.chatSearch = el.chatSearch.value;
+  render();
+});
 
 el.characterForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2288,6 +2654,11 @@ el.deleteChat.addEventListener("click", () => {
   deleteChatById(chat.id);
 });
 
+el.exportBackup.addEventListener("click", exportBackup);
+el.importBackup.addEventListener("click", () => el.backupFile.click());
+el.backupFile.addEventListener("change", importBackupFile);
+el.clearAllData.addEventListener("click", clearAllData);
+
 el.messages.addEventListener("click", (event) => {
   const button = event.target.closest("button");
   const node = event.target.closest(".message");
@@ -2324,4 +2695,5 @@ el.messageInput.addEventListener("keydown", (event) => {
 
 bindViewportHeightSync();
 bindResponsiveModeSync();
+loadServerConfig();
 loadThemes();

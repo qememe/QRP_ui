@@ -33,6 +33,14 @@
             <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
           </label>
           <button id="toggleApiKey" class="ghost api-credential-setting" type="button">Показать ключ</button>
+          <div class="server-status-row advanced-setting">
+            <span>Сервер</span>
+            <span id="serverStatus" class="status">проверка</span>
+          </div>
+          <label class="checkbox-row advanced-setting">
+            <input id="useServerApi" type="checkbox" />
+            Серверный API
+          </label>
           <div class="row">
             <select id="modelSelect" aria-label="Модель"></select>
             <button id="loadModels" type="button">Модели</button>
@@ -98,6 +106,7 @@
             <h2>Чаты</h2>
             <button id="newChat" class="small-button" type="button">+</button>
           </div>
+          <input id="chatSearch" type="search" placeholder="Поиск по чатам..." autocomplete="off" />
           <div id="chatsList" class="list"></div>
         </section>
       </aside>
@@ -164,6 +173,19 @@
           <div id="instructionEntries" class="instruction-entries" aria-label="Элементы инструкций"></div>
           <input id="instructionPresetFile" type="file" accept=".json,application/json" hidden />
         </section>
+
+        <section class="panel data-panel">
+          <div class="panel-title">
+            <h2>Данные</h2>
+            <span id="backupStatus" class="status">local</span>
+          </div>
+          <div class="row">
+            <button id="exportBackup" type="button">Экспорт</button>
+            <button id="importBackup" class="ghost" type="button">Импорт</button>
+          </div>
+          <button id="clearAllData" class="ghost danger" type="button">Сбросить локальные данные</button>
+          <input id="backupFile" type="file" accept=".json,application/json" hidden />
+        </section>
       </aside>
       <button id="rightPanelToggle" class="right-panel-toggle" type="button" title="Скрыть правую панель">×</button>
     </div>
@@ -191,6 +213,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.5/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
-    <script src="./app.js?v=7"></script>
+    <script src="./app.js?v=8"></script>
   </body>
 </html>

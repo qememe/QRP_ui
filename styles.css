@@ -307,6 +307,15 @@ label {
   height: 16px;
 }
 
+.server-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 input,
 select,
 textarea {
@@ -389,6 +398,10 @@ textarea:focus {
 .instructions-panel {
   flex: 1;
   min-height: 0;
+}
+
+.data-panel {
+  flex: 0 0 auto;
 }
 
 .instruction-entries {
